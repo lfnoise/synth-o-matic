@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Makes a release: Synth-O-Matic.app and a Patches folder with every original
-# patch that works, zipped as build/release/Synth-O-Matic-<version>.zip
+# Makes a release: Synth-O-Matic.app, the LICENSE, and a Patches folder with
+# every original patch that works, zipped as build/release/Synth-O-Matic-<version>.zip
 #
 #   SIGN_IDENTITY="Developer ID Application: ..." NOTARY_PROFILE=name scripts/make_release.sh
 #
@@ -34,6 +34,7 @@ fi
 rm -rf "$OUT"
 mkdir -p "$STAGE/Patches"
 ditto "$APP" "$STAGE/Synth-O-Matic.app"
+cp "$ROOT/../LICENSE" "$STAGE/LICENSE"
 
 # the working patches
 added=()
