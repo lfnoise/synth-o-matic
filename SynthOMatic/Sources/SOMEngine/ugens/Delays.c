@@ -1,0 +1,948 @@
+/*
+ *  Delays.c
+ *
+ *  Ported from the original Synth-O-Matic source by scripts/port_ugens.py.
+ *  Apart from the commented 'port:' fixes the code is as it was written.
+ */
+
+#include <math.h>
+#include "som_internal.h"
+
+typedef struct {
+	long looppos, loopmax;
+	double z1;
+	float buf[1];	/* start of delay line buffer */
+} CombRec, *CombRecPtr;
+
+void comb(UGen *this)		/* Comb Filter */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time, in[2] = reverb time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			decay = exp(log001 * *s2 / *s3);
+			nsmps = 32;
+			do {
+				*outi++ = y = *dlyin;
+				*dlyin++ = y * decay + *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			decay = exp(log001 * *s2 / *s3);
+			do {
+				looplen = *s2++ * gSampleRate;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = y = *dlyout;
+				*dlyin++ = y * decay + *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+void echo(UGen *this)		/* Echo Delay Line */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time, in[2] = reverb time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			decay = exp(log001 * *s2 / *s3);
+			nsmps = 32;
+			do {
+				*outi++ = y = *dlyin + *s1++;
+				*dlyin++ = y * decay;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			decay = exp(log001 * *s2 / *s3);
+			do {
+				looplen = *s2++ * gSampleRate;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = y = *dlyout + *s1++;
+				*dlyin++ = y * decay;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+
+void echoi(UGen *this)		/* Echo Delay Line */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay, frac, flooplen, v1;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time, in[2] = reverb time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			decay = exp(log001 * *s2 / *s3);
+			nsmps = 32;
+			do {
+				*outi++ = y = *dlyin + *s1++;
+				*dlyin++ = y * decay;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			decay = exp(log001 * *s2 / *s3);
+			do {
+				looplen = (long)(flooplen = *s2++ * gSampleRate);
+				frac = flooplen - looplen;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				v1 = *dlyout--;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = y = v1 + (*dlyout - v1) * frac + *s1++;
+				*dlyin++ = y * decay;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+
+void lpcomb(UGen *this)		/* Lowpass Comb Filter */
+{
+	register long nsmps, nsmp2, looplen;
+	register double g, g1, g2;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, *s4, y, z1;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time, in[2] = loop gain, in[3] = filter gain */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	s4 = this->in[3]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->z1 = 0.;
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+	
+	z1 = frec->z1;
+	
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			g = *s3;
+			g1 = *s4;
+			g2 = g * (1. - g1);
+			nsmps = 32;
+			do {
+				*outi++ = y = *dlyin;
+				*dlyin++ = z1 * g2 + *s1++;
+				z1 = z1 * g1 + y;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+			s4 += 32;
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			g = exp(log001 * *s2 / *s3);
+			g1 = *s4;
+			g2 = g * (1. - g1);
+			do {
+				looplen = *s2++ * gSampleRate;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = y = *dlyout;
+				*dlyin++ = z1 * g2 + *s1++;
+				z1 = z1 * g1 + y;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+			s4 += 32;
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+	frec->z1 = z1;
+}
+
+
+void allpass(UGen *this)		/* AllPass Filter */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time, in[2] = reverb time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			decay = exp(log001 * *s2 / *s3);
+			nsmps = 32;
+			do {
+				y = *dlyin;
+				*dlyin++ = z = decay * y + *s1++;
+				*outi++ = y - decay * z;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			decay = exp(log001 * *s2 / *s3);
+			do {
+				looplen = *s2++ * gSampleRate;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				y = *dlyout;
+				*dlyin++ = z = decay * y + *s1++;
+				*outi++ = y - decay * z;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+			s3 += 32;
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+
+void flange(UGen *this)		/* Flanger */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time, in[2] = mix */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				*outi++ = *dlyin * *s3++ + *s1;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				looplen = *s2++ * gSampleRate;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = *dlyout * *s3++ + *s1;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+void flangei(UGen *this)		/* Flanger */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z, flooplen, frac, v1;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time, in[2] = mix */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				*outi++ = *dlyin * *s3++ + *s1;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				looplen = (long)(flooplen = *s2++ * gSampleRate);
+				frac = flooplen - looplen;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				v1 = *dlyout--;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = (v1 + (*dlyout - v1) * frac) * *s3++ + *s1;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+void delay(UGen *this)		/* simple delay line */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				*outi++ = *dlyin;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				looplen = *s2++ * gSampleRate;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = *dlyout;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+
+void delayi(UGen *this)		/* simple delay line */
+{
+	register long nsmps, nsmp2, looplen;
+	register double decay;
+	register float *dlyin, *dlyout;
+	float *dly0, *dlyN;
+	register double *outi, *s1, *s2;
+	double *s3, y, z, frac, flooplen, v1;
+	long loopmax;
+	CombRecPtr frec;
+	
+	/* in[0] = input, in[1] = loop time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	if (this->state == dfUninitted) {
+		if (this->in[1]->type == sigScalar) {
+			loopmax = gSampleRate * *s2;
+			loopmax = smax(1, loopmax);	/* port: guard zero length */
+		} else {
+			loopmax = gDelayLength;
+		}
+		this->data = frec = (CombRec*)allocate(sizeof(CombRec) + 
+			(loopmax-1)*sizeof(float));
+		frec->looppos = 0;
+		frec->loopmax = loopmax;
+		dlyin = dly0 = frec->buf;
+		dlyN  = dly0 + loopmax;
+		while (dlyin < dlyN) {
+			*dlyin++ = 0.;
+		}
+		dlyin = dly0;
+	} else {
+		frec = (CombRecPtr)this->data;
+		dly0  = frec->buf;
+		dlyin = dly0 + frec->looppos;
+		dlyN  = dly0 + frec->loopmax;
+	}
+		
+	outi = this->out;
+	
+	if (this->in[1]->type == sigScalar) {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				*outi++ = *dlyin;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	} else {
+		nsmp2 = BUFLEN>>5;
+		do {
+			nsmps = 32;
+			do {
+				looplen = (long)(flooplen = *s2++ * gSampleRate);
+				frac = flooplen - looplen;
+				looplen = sclip(1, looplen, gDelayLength);
+				dlyout = dlyin - looplen;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				v1 = *dlyout--;
+				if (dlyout < dly0) dlyout += gDelayLength;
+				*outi++ = v1 + (*dlyout - v1) * frac;
+				*dlyin++ = *s1++;
+				if (dlyin >= dlyN) dlyin = dly0;
+			} while (--nsmps);
+		} while (--nsmp2);
+	}
+	frec->looppos = dlyin - dly0;
+}
+
+
+typedef struct {
+	double cmb1f,  cmb2f,  cmb3f,  cmb4f,  alp1f,  alp2f;	/* decay factors */
+	float *cmb1o, *cmb2o, *cmb3o, *cmb4o, *alp1o, *alp2o;	/* loop start points */
+	float *cmb1p, *cmb2p, *cmb3p, *cmb4p, *alp1p, *alp2p;	/* loop pointers */
+	float *bufend;		/* end of buffer */
+	float buf[1];
+} ReverbRec, *ReverbRecPtr;
+
+static	float	flpt[6] = {.0297, .0371, .0411, .0437, .005, .0017 };
+
+void reverb(UGen *this)		/* Textbook Reverberator */
+{						/* surely we can do better than this ! */
+	register long nsmps, nsmp2;
+	double cmb1f,  cmb2f,  cmb3f,  cmb4f,  alp1f,  alp2f;	/* decay factors */
+	float *cmb1p, *cmb2p, *cmb3p, *cmb4p, *alp1p, *alp2p;	/* loop pointers */
+	register double *outi, *s1, *s2;
+	double y1, y2, combsum, z, logdrvt;
+	long loopsum, i, ilpt[6];
+	ReverbRecPtr p;
+	
+	/* in[0] = input, in[1] = reverb time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	if (this->state == dfUninitted) {
+		loopsum = 0;
+		for (i=0; i<6; ++i) loopsum += (ilpt[i] = gSampleRate * flpt[i]);
+		
+		this->data = p = (ReverbRecPtr)allocate(sizeof(ReverbRec) + 
+			(loopsum-1)*sizeof(float));
+		p->bufend = p->buf + loopsum;
+		for(i=0; i<loopsum; ++i) p->buf[i] = 0.;
+		p->cmb1o = p->cmb1p = p->buf;
+		p->cmb2o = p->cmb2p = p->cmb1o + ilpt[0];
+		p->cmb3o = p->cmb3p = p->cmb2o + ilpt[1];
+		p->cmb4o = p->cmb4p = p->cmb3o + ilpt[2];
+		p->alp1o = p->alp1p = p->cmb4o + ilpt[3];
+		p->alp2o = p->alp2p = p->alp1o + ilpt[4];
+		if (p->alp2o + ilpt[5] != p->buf + loopsum) {
+			dprintf("Reverb Loop Size Discrepancy\r");
+		}
+		
+		logdrvt = log001 / *s2;
+		p->cmb1f = exp(logdrvt * flpt[0]);
+		p->cmb2f = exp(logdrvt * flpt[1]);
+		p->cmb3f = exp(logdrvt * flpt[2]);
+		p->cmb4f = exp(logdrvt * flpt[3]);
+		p->alp1f = exp(logdrvt * flpt[4]);
+		p->alp2f = exp(logdrvt * flpt[5]);
+	} else {
+		p = (ReverbRecPtr)this->data;
+	}
+
+	cmb1p = p->cmb1p;			cmb1f = p->cmb1f;
+	cmb2p = p->cmb2p;			cmb2f = p->cmb2f;
+	cmb3p = p->cmb3p;			cmb3f = p->cmb3f;
+	cmb4p = p->cmb4p;			cmb4f = p->cmb4f;
+	alp1p = p->alp1p;			alp1f = p->alp1f;
+	alp2p = p->alp2p;			alp2f = p->alp2f;
+		
+	outi = this->out;
+	combsum = 0.;
+	
+	nsmp2 = BUFLEN>>5;
+	do {
+		nsmps = 32;
+		do {
+			combsum = *cmb1p + *cmb2p + *cmb3p + *cmb4p;
+			*cmb1p = cmb1f * *cmb1p + *s1;
+			*cmb2p = cmb2f * *cmb2p + *s1;
+			*cmb3p = cmb3f * *cmb3p + *s1;
+			*cmb4p = cmb4f * *cmb4p + *s1++;
+			cmb1p++; cmb2p++; cmb3p++; cmb4p++;
+			y1 = *alp1p;
+			*alp1p++ = z = alp1f * y1 + combsum;
+			y1 -= alp1f * z;
+			y2 = *alp2p;
+			*alp2p++ = z = alp2f * y2 + y1;
+			*outi++ = y2 - alp1f * z;
+			
+			if (cmb1p >= p->cmb2o)	cmb1p = p->cmb1o;
+			if (cmb2p >= p->cmb3o)	cmb2p = p->cmb2o;
+			if (cmb3p >= p->cmb4o)	cmb3p = p->cmb3o;
+			if (cmb4p >= p->alp1o)	cmb4p = p->cmb4o;
+			if (alp1p >= p->alp2o)	alp1p = p->alp1o;
+			if (alp2p >= p->bufend)	alp2p = p->alp2o;
+		} while (--nsmps);
+		s2 += 32;
+	} while (--nsmp2);
+	p->cmb1p = cmb1p;
+	p->cmb2p = cmb2p;
+	p->cmb3p = cmb3p;
+	p->cmb4p = cmb4p;
+	p->alp1p = alp1p;
+	p->alp2p = alp2p;
+}
+
+void reverb2(UGen *this)		/* Textbook Reverberator */
+{						/* surely we can do better than this ! */
+	register long nsmps, nsmp2;
+	double cmb1f,  cmb2f,  cmb3f,  cmb4f,  alp1f,  alp2f;	/* decay factors */
+	float *cmb1p, *cmb2p, *cmb3p, *cmb4p, *alp1p, *alp2p;	/* loop pointers */
+	register double *outi, *s1, *s2;
+	double y1, y2, combsum1, combsum2, z, logdrvt;
+	long loopsum, i, ilpt[6];
+	ReverbRecPtr p;
+	
+	/* in[0] = input, in[1] = reverb time */
+
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	if (this->state == dfUninitted) {
+		loopsum = 0;
+		for (i=0; i<6; ++i) loopsum += (ilpt[i] = gSampleRate * flpt[i]);
+		
+		this->data = p = (ReverbRecPtr)allocate(sizeof(ReverbRec) + 
+			(loopsum-1)*sizeof(float));
+		p->bufend = p->buf + loopsum;
+		for(i=0; i<loopsum; ++i) p->buf[i] = 0.;
+		p->cmb1o = p->cmb1p = p->buf;
+		p->cmb2o = p->cmb2p = p->cmb1o + ilpt[0];
+		p->cmb3o = p->cmb3p = p->cmb2o + ilpt[1];
+		p->cmb4o = p->cmb4p = p->cmb3o + ilpt[2];
+		p->alp1o = p->alp1p = p->cmb4o + ilpt[3];
+		p->alp2o = p->alp2p = p->alp1o + ilpt[4];
+		if (p->alp2o + ilpt[5] != p->buf + loopsum) {
+			dprintf("Reverb Loop Size Discrepancy\r");
+		}
+		
+		logdrvt = log001 / *s2;
+		p->cmb1f = exp(logdrvt * flpt[0]);
+		p->cmb2f = exp(logdrvt * flpt[1]);
+		p->cmb3f = exp(logdrvt * flpt[2]);
+		p->cmb4f = exp(logdrvt * flpt[3]);
+		p->alp1f = exp(logdrvt * flpt[4]);
+		p->alp2f = exp(logdrvt * flpt[5]);
+	} else {
+		p = (ReverbRecPtr)this->data;
+	}
+
+	cmb1p = p->cmb1p;			cmb1f = p->cmb1f;
+	cmb2p = p->cmb2p;			cmb2f = p->cmb2f;
+	cmb3p = p->cmb3p;			cmb3f = p->cmb3f;
+	cmb4p = p->cmb4p;			cmb4f = p->cmb4f;
+	alp1p = p->alp1p;			alp1f = p->alp1f;
+	alp2p = p->alp2p;			alp2f = p->alp2f;
+		
+	outi = this->out;
+	
+	nsmp2 = BUFLEN>>5;
+	do {
+		nsmps = 32;
+		do {
+			combsum1 = *cmb1p + *cmb2p;
+			*cmb1p = cmb1f * *cmb1p + *s1;
+			*cmb2p = cmb2f * *cmb2p + *s1++;
+			combsum2 = *cmb3p + *cmb4p;
+			*cmb3p = cmb3f * *cmb3p + combsum1;
+			*cmb4p = cmb4f * *cmb4p + combsum1;
+			cmb1p++; cmb2p++; cmb3p++; cmb4p++;
+			y1 = *alp1p;
+			*alp1p++ = z = alp1f * y1 + combsum2;
+			y1 -= alp1f * z;
+			y2 = *alp2p;
+			*alp2p++ = z = alp2f * y2 + y1;
+			*outi++ = y2 - alp1f * z;
+			
+			if (cmb1p >= p->cmb2o)	cmb1p = p->cmb1o;
+			if (cmb2p >= p->cmb3o)	cmb2p = p->cmb2o;
+			if (cmb3p >= p->cmb4o)	cmb3p = p->cmb3o;
+			if (cmb4p >= p->alp1o)	cmb4p = p->cmb4o;
+			if (alp1p >= p->alp2o)	alp1p = p->alp1o;
+			if (alp2p >= p->bufend)	alp2p = p->alp2o;
+		} while (--nsmps);
+		s2 += 32;
+	} while (--nsmp2);
+	p->cmb1p = cmb1p;
+	p->cmb2p = cmb2p;
+	p->cmb3p = cmb3p;
+	p->cmb4p = cmb4p;
+	p->alp1p = alp1p;
+	p->alp2p = alp2p;
+}
+
+typedef struct {
+	float *tap1, *tap2, *tap3, *tap4, *dlyin, *bufend;
+	float buf[1];
+} MTapRec, *MTapRecPtr;
+
+void multitap(UGen *this)		/* multitap delay line */
+{					
+	register long nsmps;
+	float *tap1, *tap2, *tap3, *tap4, *dlyin;	/* loop pointers */
+	register double *s1, *s2, *outi;
+	double *s3, *s4, *s5, *s6, *s7, *s8, *s9, *s10;
+	double tapsum;
+	long looplen, i, t1, t2, t3, t4;
+	MTapRecPtr p;
+	
+
+	s1  = this->in[0]->out;	/* input */
+	s2  = this->in[1]->out;	/* feedback */
+	s7  = this->in[6]->out;	/* amp 1 */
+	s8  = this->in[7]->out;	/* amp 2 */
+	s9  = this->in[8]->out;	/* amp 3 */
+	s10 = this->in[9]->out;	/* amp 4 */
+	if (this->state == dfUninitted) {
+		s3  = this->in[2]->out;	/* time 1 */
+		s4  = this->in[3]->out;	/* time 2 */
+		s5  = this->in[4]->out;	/* time 3 */
+		s6  = this->in[5]->out;	/* time 4 */
+		t1 = *s3 * gSampleRate;		t1 = smax(1, t1);
+		t2 = *s4 * gSampleRate;		t2 = smax(1, t2);
+		t3 = *s5 * gSampleRate;		t3 = smax(1, t3);
+		t4 = *s6 * gSampleRate;		t4 = smax(1, t4);
+		looplen = smax(smax(t1, t2), smax(t3, t4));
+		this->data = p = (MTapRecPtr)allocate(sizeof(MTapRec) + 
+			(looplen-1)*sizeof(float));
+		p->dlyin = p->buf;
+		p->bufend = p->buf + looplen;
+		for(i=0; i<looplen; ++i) p->buf[i] = 0.;
+		p->tap1 = p->buf + looplen - t1;
+		p->tap2 = p->buf + looplen - t2;
+		p->tap3 = p->buf + looplen - t3;
+		p->tap4 = p->buf + looplen - t4;
+	} else {
+		p = (MTapRecPtr)this->data;
+	}
+
+	tap1 = p->tap1;
+	tap2 = p->tap2;
+	tap3 = p->tap3;
+	tap4 = p->tap4;
+	dlyin = p->dlyin;	
+	outi = this->out;
+	
+	nsmps = BUFLEN;
+	do {
+		*outi = *s7++ * *tap1++ + *s8++ * *tap2++ 
+				+ *s9++ * *tap3++ + *s10++ * *tap4++;
+		*dlyin++ = *outi++ * *s2+++ + *s1++;
+		
+		if (dlyin >= p->bufend)	dlyin = p->buf;
+		if (tap1  >= p->bufend)	tap1 = p->buf;
+		if (tap2  >= p->bufend)	tap2 = p->buf;
+		if (tap3  >= p->bufend)	tap3 = p->buf;
+		if (tap4  >= p->bufend)	tap4 = p->buf;
+	} while (--nsmps);
+	p->tap1 = tap1;
+	p->tap2 = tap2;
+	p->tap3 = tap3;
+	p->tap4 = tap4;
+	p->dlyin = dlyin;
+}

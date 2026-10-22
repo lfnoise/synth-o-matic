@@ -1,0 +1,1 @@
+void *alloca(size_t);

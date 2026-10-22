@@ -1,0 +1,1 @@
+typedef struct {	long ckid1;	long cksize1;	long formtype;	long ckid2;	long cksize2;	int numchannels;	long numsampframes;	int sampleSize;	extended80 srate;	long ckid3;	long cksize3;	long offset;	long blocksize;} AIFFHeader;typedef union {	double x;	int y[6];} uDbl;

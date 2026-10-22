@@ -1,0 +1,4 @@
+# The original 1990-92 sources are MacRoman with CR line endings, and the
+# patches are binary. Keep them byte for byte.
+SOM-classic/** -text -diff
+SynthOMatic/Tests/SOMEngineTests/Patches/** binary

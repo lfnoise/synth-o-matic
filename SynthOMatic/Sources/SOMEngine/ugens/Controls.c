@@ -1,0 +1,833 @@
+/*
+ *  Controls.c
+ *
+ *  Ported from the original Synth-O-Matic source by scripts/port_ugens.py.
+ *  Apart from the commented 'port:' fixes the code is as it was written.
+ */
+
+#include "som_internal.h"
+#include <math.h>
+
+typedef struct {
+	double level, slope;
+	long countdown;
+	int stage;
+} BPEnvRec, *BPEnvRecPtr;
+
+void bpenv(UGen *this)		/* breakpoint envelope generator */
+{
+	register double *outi, level, slope;
+	register long nsmp2;
+	double nsmp3;
+	BPEnvRecPtr rrec;
+	double *s1;
+	long nsmps, numdone;
+	int i;
+	
+	s1 = this->in[0]->out;	/* breakpoint table */
+	outi = this->out;
+	if (this->state == dfUninitted) {
+		this->data = rrec = (BPEnvRec*)allocate(sizeof(BPEnvRec));
+		rrec->stage = 0;
+		rrec->level = s1[0];
+		rrec->countdown = nsmp3 = gSampleRate * s1[1];
+		rrec->slope = (s1[2] - s1[0]) / nsmp3;
+	} else {
+		rrec = (BPEnvRec*)this->data;
+	}
+	nsmps = BUFLEN;
+	for (; rrec->stage < 510 && nsmps; ) {
+		slope = rrec->slope;
+		level = rrec->level;
+		nsmp2 = numdone = smin(nsmps, rrec->countdown);
+		while (nsmp2--) {
+			*outi++ = level;
+			level += slope;
+		}
+		rrec->level = level;
+		nsmps -= numdone;
+		rrec->countdown -= numdone;
+		if (rrec->countdown <= 0) {
+			rrec->stage += 2;
+			rrec->level = s1[rrec->stage];
+			rrec->countdown = nsmp3 = gSampleRate * s1[rrec->stage + 1];
+			rrec->slope = (s1[rrec->stage + 2] - s1[rrec->stage]) / nsmp3;
+		}
+	}
+	if (rrec->stage >= 510 && nsmps) {
+		level = rrec->level;
+		do {
+			*outi++ = level;
+		} while (--nsmps);
+	}
+}
+
+void bpenv2(UGen *this)		/* breakpoint envelope generator with level & time scaling */
+{
+	register double *outi, level, slope;
+	register long nsmp2;
+	double nsmp3;
+	BPEnvRecPtr rrec;
+	double *s1, *s2, *s3;
+	long nsmps, numdone;
+	int i;
+	
+	s1 = this->in[0]->out;	/* breakpoint table */
+	s2 = this->in[1]->out;	/* level scaling */
+	s3 = this->in[2]->out;	/* time scaling */
+	outi = this->out;
+	if (this->state == dfUninitted) {
+		this->data = rrec = (BPEnvRec*)allocate(sizeof(BPEnvRec));
+		rrec->stage = 0;
+		rrec->level = s1[0] * s2[0];
+		rrec->countdown = nsmp3 = gSampleRate * s1[1] * s3[0];
+		rrec->slope = (s1[2] - s1[0]) / nsmp3;
+	} else {
+		rrec = (BPEnvRec*)this->data;
+	}
+	nsmps = BUFLEN;
+	for (; rrec->stage < 510 && nsmps; ) {
+		slope = rrec->slope;
+		level = rrec->level;
+		nsmp2 = numdone = smin(nsmps, rrec->countdown);
+		while (nsmp2--) {
+			*outi++ = level;
+			level += slope;
+		}
+		rrec->level = level;
+		nsmps -= numdone;
+		rrec->countdown -= numdone;
+		if (rrec->countdown <= 0) {
+			rrec->stage += 2;
+			rrec->level = s1[rrec->stage] * s2[BUFLEN-nsmps];
+			rrec->countdown = nsmp3 = gSampleRate * s1[rrec->stage + 1] * s3[BUFLEN-nsmps];
+			rrec->slope = ((s1[rrec->stage + 2] - s1[rrec->stage]) / nsmp3) * s2[BUFLEN-nsmps];
+		}
+	}
+	if (rrec->stage >= 510 && nsmps) {
+		level = rrec->level;
+		do {
+			*outi++ = level;
+		} while (--nsmps);
+	}
+}
+
+
+typedef struct {
+	long freq, phase, pphase;
+	double level;
+} Oscil1Rec, *Oscil1RecPtr;
+
+
+
+void oscil1(UGen *this)
+{
+	register double level, slope;
+	register double *outi, *s1, *s2;
+	register long nsmps, phase, pphase, freq;
+	double nxtlevel, frac, v1;
+	double *tbl;
+	int j;
+	Oscil1RecPtr osc;
+	
+	/* in[0] is wavetable, in[1] is fm */
+	
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	if (this->state == dfUninitted) {
+		this->data = osc = (Oscil1RecPtr)allocate(sizeof(Oscil1Rec));
+		if (this->in[1]->type == sigScalar) osc->freq  = cps2lfinc / *s2;
+		else osc->freq  = 0L;
+		osc->phase  = 0L;
+		osc->pphase = 0L;
+		osc->level = s1[0];
+	} else {
+		osc = (Oscil1RecPtr)this->data;
+	}
+	
+	outi = this->out;
+	phase = osc->phase;
+	pphase = osc->pphase;
+	freq  = osc->freq;
+	level = nxtlevel = osc->level;
+	
+	nsmps = BUFLEN>>5;
+	if (this->in[1]->type == sigScalar) {		/* no fm */
+		for (; nsmps && phase < onecyc; nsmps--) {
+			level = nxtlevel;
+			phase += freq;
+			frac = PFRAC(phase);
+			pphase = phase >> lobits;
+			pphase = smin(pphase, BUFLEN-2);
+			v1 = s1[pphase];
+			pphase = smin(pphase+1, BUFLEN-2);
+			nxtlevel = v1 + (s1[pphase] - v1) * frac;
+			slope = (nxtlevel - level) * .03125;
+			for (j=4; j; --j) {
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+			}
+		}
+	} else {	/* fm */
+		for (; nsmps && phase < onecyc; nsmps--) {
+			level = nxtlevel;
+			phase += (long)(cps2lfinc / *s2);
+			s2 += 32;
+			frac = PFRAC(phase);
+			pphase = phase >> lobits;
+			pphase = smin(pphase, BUFLEN-2);
+			v1 = s1[pphase];
+			pphase = smin(pphase+1, BUFLEN-2);
+			nxtlevel = v1 + (s1[pphase] - v1) * frac;
+			slope = (nxtlevel - level) * .03125;
+			for (j=4; j; --j) {
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+			}
+		}
+	}
+	if (phase >= onecyc && nsmps) {
+		for (nsmps <<= 5; nsmps; nsmps--) {	/* port: fill the rest of the block */
+			*outi++ = s1[BUFLEN-1];
+		}
+	}
+	osc->phase = phase;
+	osc->pphase = pphase;
+	osc->level = nxtlevel;
+}
+
+
+void oscil1a(UGen *this)
+{
+	register double level, slope;
+	register double *outi, *s1, *s2, *s3;
+	register long nsmps, phase, pphase, freq;
+	double nxtlevel, frac, v1;
+	double *tbl;
+	int j;
+	Oscil1RecPtr osc;
+	
+	/* in[0] is wavetable, in[1] is dur, in[2] is amp */
+	
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		this->data = osc = (Oscil1RecPtr)allocate(sizeof(Oscil1Rec));
+		if (this->in[1]->type == sigScalar) osc->freq  = cps2lfinc / *s2;
+		else osc->freq  = 0L;
+		osc->phase  = 0L;
+		osc->pphase = 0L;
+		osc->level = s1[0];
+	} else {
+		osc = (Oscil1RecPtr)this->data;
+	}
+	
+	outi = this->out;
+	phase = osc->phase;
+	pphase = osc->pphase;
+	freq  = osc->freq;
+	level = nxtlevel = osc->level;
+	
+	nsmps = BUFLEN>>5;
+	if (this->in[1]->type == sigScalar) {		/* no fm */
+		for (; nsmps && phase < onecyc; nsmps--) {
+			level = nxtlevel;
+			phase += freq;
+			frac = PFRAC(phase);
+			pphase = phase >> lobits;
+			pphase = smin(pphase, BUFLEN-2);
+			v1 = s1[pphase];
+			pphase = smin(pphase+1, BUFLEN-2);
+			nxtlevel = (v1 + (s1[pphase] - v1) * frac) * *s3;	/* port: was *tbl, uninitialized */
+			s3 += 32;
+			slope = (nxtlevel - level) * .03125;
+			for (j=4; j; --j) {
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+			}
+		}
+	} else {	/* fm */
+		for (; nsmps && phase < onecyc; nsmps--) {
+			level = nxtlevel;
+			phase += (long)(cps2lfinc / *s2);
+			s2 += 32;
+			frac = PFRAC(phase);
+			pphase = phase >> lobits;
+			pphase = smin(pphase, BUFLEN-2);
+			v1 = s1[pphase];
+			pphase = smin(pphase+1, BUFLEN-2);
+			nxtlevel = (v1 + (s1[pphase] - v1) * frac) * *s3;	/* port: was *tbl, uninitialized */
+			s3 += 32;
+			slope = (nxtlevel - level) * .03125;
+			for (j=4; j; --j) {
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+			}
+		}
+	}
+	if (phase >= onecyc && nsmps) {
+		for (nsmps <<= 5; nsmps; nsmps--) {	/* port: fill the rest of the block */
+			*outi++ = s1[BUFLEN-1];
+		}
+	}
+	osc->phase = phase;
+	osc->pphase = pphase;
+	osc->level = nxtlevel;
+}
+
+void toscil1a(UGen *this)	/* triggered oscil1 ** unfinished ** */
+{
+	register double level, slope;
+	register double *outi, *s1, *s2, *s3, *s4;
+	register long nsmps, phase, pphase, freq;
+	double nxtlevel, frac, v1;
+	double *tbl;
+	int j;
+	Oscil1RecPtr osc;
+	
+	/* in[0] is wavetable, in[1] is dur, in[2] is amp */
+	
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	s4 = this->in[3]->out;
+	if (this->state == dfUninitted) {
+		this->data = osc = (Oscil1RecPtr)allocate(sizeof(Oscil1Rec));
+		if (this->in[1]->type == sigScalar) osc->freq  = cps2lfinc / *s2;
+		else osc->freq  = 0L;
+		osc->phase  = 0L;
+		osc->pphase = 0L;
+		osc->level = s1[0];
+	} else {
+		osc = (Oscil1RecPtr)this->data;
+	}
+	
+	outi = this->out;
+	phase = osc->phase;
+	pphase = osc->pphase;
+	freq  = osc->freq;
+	level = nxtlevel = osc->level;
+	
+	nsmps = BUFLEN>>5;
+	if (this->in[1]->type == sigScalar) {		/* no fm */
+		for (; nsmps && phase < onecyc; nsmps--) {
+			level = nxtlevel;
+			phase += freq;
+			frac = PFRAC(phase);
+			pphase = phase >> lobits;
+			pphase = smin(pphase, BUFLEN-2);
+			v1 = s1[pphase];
+			pphase = smin(pphase+1, BUFLEN-2);
+			nxtlevel = (v1 + (s1[pphase] - v1) * frac) * *s3;	/* port: was *tbl, uninitialized */
+			s3 += 32;
+			slope = (nxtlevel - level) * .03125;
+			for (j=4; j; --j) {
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+			}
+		}
+	} else {	/* fm */
+		for (; nsmps && phase < onecyc; nsmps--) {
+			level = nxtlevel;
+			phase += (long)(cps2lfinc / *s2);
+			s2 += 32;
+			frac = PFRAC(phase);
+			pphase = phase >> lobits;
+			pphase = smin(pphase, BUFLEN-2);
+			v1 = s1[pphase];
+			pphase = smin(pphase+1, BUFLEN-2);
+			nxtlevel = (v1 + (s1[pphase] - v1) * frac) * *s3;	/* port: was *tbl, uninitialized */
+			s3 += 32;
+			slope = (nxtlevel - level) * .03125;
+			for (j=4; j; --j) {
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+			}
+		}
+	}
+	if (phase >= onecyc && nsmps) {
+		for (nsmps <<= 5; nsmps; nsmps--) {	/* port: fill the rest of the block */
+			*outi++ = s1[BUFLEN-1];
+		}
+	}
+	osc->phase = phase;
+	osc->pphase = pphase;
+	osc->level = nxtlevel;
+}
+
+
+
+void lfo(UGen *this)
+{
+	register double level, slope;
+	register double *outi, *s1, *s2, *s3;
+	register long nsmps, phase, pphase, freq;
+	double nxtlevel, frac, v1;
+	double *tbl;
+	int j;
+	Oscil1RecPtr osc;
+	
+	/* in[0] is wavetable, in[1] is fm, in[2] is pm */
+	
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		this->data = osc = (Oscil1RecPtr)allocate(sizeof(Oscil1Rec));
+		if (this->in[1]->type == sigScalar) osc->freq  = cps2lfinc * *s2;
+		else osc->freq  = 0L;
+		if (this->in[2]->type == sigScalar) osc->phase = rad2lfinc * *s3;
+		else osc->phase  = 0L;
+		osc->pphase = 0L;
+		osc->level = s1[(long)(rad2lfinc * *s3)>>lobits & lomask];
+	} else {
+		osc = (Oscil1RecPtr)this->data;
+	}
+	
+	outi = this->out;
+	phase = osc->phase;
+	pphase = osc->pphase;
+	freq  = osc->freq;
+	level = nxtlevel = osc->level;
+	nsmps = BUFLEN>>5;
+	if (this->in[1]->type == sigScalar) {		/* no fm */
+		if (this->in[2]->type == sigScalar) {		/* no pm */
+			do {
+				level = nxtlevel;
+				phase += freq;
+				frac = PFRAC(phase);
+				tbl = s1 + ((phase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm */
+				level = nxtlevel;
+				phase += freq;
+				pphase = phase + (long)(rad2lfinc * *s3);
+				frac = PFRAC(pphase);
+				tbl = s1 + ((pphase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				s3 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	} else {
+		if (this->in[2]->type == sigScalar) {		/* no pm */
+			do {	/* fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc * *s2);
+				frac = PFRAC(phase);
+				tbl = s1 + ((phase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm, fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc * *s2);
+				pphase = phase + (long)(rad2lfinc * *s3);
+				frac = PFRAC(pphase);
+				tbl = s1 + ((pphase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				s3 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	}
+	osc->phase = phase;
+	osc->pphase = pphase;
+	osc->level = nxtlevel;
+}
+
+void lfoa(UGen *this)
+{
+	register double level, slope;
+	register double *outi, *s1, *s2, *s3, *s4;
+	register long nsmps, phase, pphase, freq;
+	double nxtlevel, frac, v1;
+	double *tbl;
+	int j;
+	Oscil1RecPtr osc;
+	
+	/* in[0] is wavetable, in[1] is fm, in[2] is pm, in[3] is amp */
+	
+	s1 = this->in[0]->out;
+	s2 = this->in[1]->out;
+	s3 = this->in[2]->out;
+	s4 = this->in[3]->out;
+	if (this->state == dfUninitted) {
+		this->data = osc = (Oscil1RecPtr)allocate(sizeof(Oscil1Rec));
+		if (this->in[1]->type == sigScalar) osc->freq  = cps2lfinc * *s2;
+		else osc->freq  = 0L;
+		if (this->in[2]->type == sigScalar) osc->phase = rad2lfinc * *s3;
+		else osc->phase  = 0L;
+		osc->pphase = 0L;
+		osc->level = s1[(long)(rad2lfinc * *s3)>>lobits & lomask];
+	} else {
+		osc = (Oscil1RecPtr)this->data;
+	}
+	
+	outi = this->out;
+	phase = osc->phase;
+	pphase = osc->pphase;
+	freq  = osc->freq;
+	level = nxtlevel = osc->level;
+	nsmps = BUFLEN>>5;
+	if (this->in[1]->type == sigScalar) {		/* no fm */
+		if (this->in[2]->type == sigScalar) {		/* no pm */
+			do {
+				level = nxtlevel;
+				phase += freq;
+				frac = PFRAC(phase);
+				tbl = s1 + ((phase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				s4 += 32;
+				slope = (nxtlevel - level) * .03125;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm */
+				level = nxtlevel;
+				phase += freq;
+				pphase = phase + (long)(rad2lfinc * *s3);
+				frac = PFRAC(pphase);
+				tbl = s1 + ((pphase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				s4 += 32;
+				slope = (nxtlevel - level) * .03125;
+				s3 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	} else {
+		if (this->in[2]->type == sigScalar) {		/* no pm */
+			do {	/* fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc * *s2);
+				frac = PFRAC(phase);
+				tbl = s1 + ((phase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				s4 += 32;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm, fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc * *s2);
+				pphase = phase + (long)(rad2lfinc * *s3);
+				frac = PFRAC(pphase);
+				tbl = s1 + ((pphase >> lobits) & lomask);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				s3 += 32;
+				s4 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	}
+	osc->phase = phase;
+	osc->pphase = pphase;
+	osc->level = nxtlevel;
+}
+
+void sinlfo(UGen *this)
+{
+	register double level, slope;
+	register double *outi, *s2, *s3;
+	register long nsmps, phase, pphase, freq;
+	double nxtlevel, frac, v1;
+	double *tbl;
+	int j;
+	Oscil1RecPtr osc;
+	
+	/* in[0] is fm, in[1] is pm */
+	
+	s2 = this->in[0]->out;
+	s3 = this->in[1]->out;
+	if (this->state == dfUninitted) {
+		this->data = osc = (Oscil1RecPtr)allocate(sizeof(Oscil1Rec));
+		if (this->in[0]->type == sigScalar) osc->freq  = cps2lfinc2 * *s2;
+		else osc->freq  = 0L;
+		if (this->in[1]->type == sigScalar) osc->phase = rad2lfinc2 * *s3;
+		else osc->phase  = 0L;
+		osc->pphase = 0L;
+		osc->level = sine[(long)(rad2lfinc2 * *s3)>>lobits & lomask];
+	} else {
+		osc = (Oscil1RecPtr)this->data;
+	}
+	
+	outi = this->out;
+	phase = osc->phase;
+	pphase = osc->pphase;
+	freq  = osc->freq;
+	level = nxtlevel = osc->level;
+	nsmps = BUFLEN>>5;
+	if (this->in[0]->type == sigScalar) {		/* no fm */
+		if (this->in[1]->type == sigScalar) {		/* no pm */
+			do {
+				level = nxtlevel;
+				phase += freq;
+				frac = PFRAC(phase);
+				tbl = sine + ((phase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm */
+				level = nxtlevel;
+				phase += freq;
+				pphase = phase + (long)(rad2lfinc2 * *s3);
+				frac = PFRAC(pphase);
+				tbl = sine + ((pphase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				s3 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	} else {
+		if (this->in[1]->type == sigScalar) {		/* no pm */
+			do {	/* fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc2 * *s2);
+				frac = PFRAC(phase);
+				tbl = sine + ((phase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm, fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc2 * *s2);
+				pphase = phase + (long)(rad2lfinc2 * *s3);
+				frac = PFRAC(pphase);
+				tbl = sine + ((pphase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = v1 + (*tbl - v1) * frac;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				s3 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	}
+	osc->phase = phase;
+	osc->pphase = pphase;
+	osc->level = nxtlevel;
+}
+
+void sinlfoa(UGen *this)
+{
+	register double level, slope;
+	register double *outi, *s2, *s3, *s4;
+	register long nsmps, phase, pphase, freq;
+	double nxtlevel, frac, v1;
+	double *tbl;
+	int j;
+	Oscil1RecPtr osc;
+	
+	/* in[0] is fm, in[1] is pm */
+	
+	s2 = this->in[0]->out;
+	s3 = this->in[1]->out;
+	s4 = this->in[2]->out;
+	if (this->state == dfUninitted) {
+		this->data = osc = (Oscil1RecPtr)allocate(sizeof(Oscil1Rec));
+		if (this->in[0]->type == sigScalar) osc->freq  = cps2lfinc2 * *s2;
+		else osc->freq  = 0L;
+		if (this->in[1]->type == sigScalar) osc->phase = rad2lfinc2 * *s3;
+		else osc->phase  = 0L;
+		osc->pphase = 0L;
+		osc->level = sine[(long)(rad2lfinc2 * *s3)>>lobits & lomask];
+	} else {
+		osc = (Oscil1RecPtr)this->data;
+	}
+	
+	outi = this->out;
+	phase = osc->phase;
+	pphase = osc->pphase;
+	freq  = osc->freq;
+	level = nxtlevel = osc->level;
+	nsmps = BUFLEN>>5;
+	if (this->in[0]->type == sigScalar) {		/* no fm */
+		if (this->in[1]->type == sigScalar) {		/* no pm */
+			do {
+				level = nxtlevel;
+				phase += freq;
+				frac = PFRAC(phase);
+				tbl = sine + ((phase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				slope = (nxtlevel - level) * .03125;
+				s4 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm */
+				level = nxtlevel;
+				phase += freq;
+				pphase = phase + (long)(rad2lfinc2 * *s3);
+				frac = PFRAC(pphase);
+				tbl = sine + ((pphase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				slope = (nxtlevel - level) * .03125;
+				s3 += 32;
+				s4 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	} else {
+		if (this->in[1]->type == sigScalar) {		/* no pm */
+			do {	/* fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc2 * *s2);
+				frac = PFRAC(phase);
+				tbl = sine + ((phase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				s4 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		} else {
+			do {	/* pm, fm */
+				level = nxtlevel;
+				phase += (long)(cps2lfinc2 * *s2);
+				pphase = phase + (long)(rad2lfinc2 * *s3);
+				frac = PFRAC(pphase);
+				tbl = sine + ((pphase >> lobits) & lomask2);
+				v1 = *tbl++;
+				nxtlevel = (v1 + (*tbl - v1) * frac) * *s4;
+				slope = (nxtlevel - level) * .03125;
+				s2 += 32;
+				s3 += 32;
+				s4 += 32;
+				for (j=4; j; --j) {
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+					*outi++ = level;	level += slope;		*outi++ = level;	level += slope;	
+				}
+			} while (--nsmps);
+		}
+	}
+	osc->phase = phase;
+	osc->pphase = pphase;
+	osc->level = nxtlevel;
+}
+
+

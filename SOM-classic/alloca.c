@@ -1,0 +1,1 @@
+#include <stdlib.h>void *alloca() {	asm {		move.l		(a7)+, a0		move.l		(a7)+, d1		sub.l		d1, a7		move.l		a7, d0		sub.l		#4, a7		jmp			(a0)	}}bcopy(void *src, void *dst, size_t size) {	BlockMove(src, dst, size);}

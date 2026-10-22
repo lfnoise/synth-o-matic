@@ -1,0 +1,172 @@
+%token	IDENTIFIER FUNCNAME DECLARATOR CONSTANT VARIABLE
+%token  IF ELSE BADTOKEN
+%right PLUSEQ MINUSEQ MULTEQ DIVEQ EXPONEQ '='
+%left	LOGICOR LOGICAND
+%left	GREQ LESSEQ NOTEQ CMPEQ '>' '<'
+%left	'+' '-'
+%left	'*' '/'
+%left	'^'
+%right	UMINUS UPLUS '!'
+
+%pure-parser
+
+%{
+/*
+ *  som_grammar.y
+ *
+ *  The Synth-O-Matic grammar, the original harp9.y.  The parser is now
+ *  reentrant (each document has its own context), the lexer's yylen/yytext
+ *  macros are hidden from the bison skeleton, and -=, /= and ^= use the
+ *  reversed opcodes: the original computed b - a for a -= b.
+ *
+ *  Regenerate som_grammar.c and som_grammar.h with:
+ *    bison --defines=Sources/SOMEngine/som_grammar.h -o Sources/SOMEngine/som_grammar.c grammar/som_grammar.y
+ */
+#include "som_internal.h"
+#undef yylen
+#undef yytext
+%}
+
+%%
+
+program		:	statementlist
+			{ /*compile2(opEnd, -1);*/ }
+			;
+
+statementlist	:	statement
+			|	statementlist statement
+			;
+
+ifstmt		:	IF '(' expr ')' { if (!compile2(opIf, -1)) YYERROR; } statement
+			;
+
+statement	:	assignment ';'	{ compile2(opDrop, -1); }	
+			|	assignvec ';'	{ compile2(opDrop, -1); }		
+			|	funccall ';'	{ compile2(opDrop, -1); }
+			|	'{' statementlist '}'
+			|	ifstmt { compile2(opEndIf, -1); }
+			|	ifstmt ELSE { compile2(opElse, -1); } statement 
+								{ compile2(opEndIfElse, -1); }
+			;
+			
+assignment	:	VARIABLE '=' expr 
+				{ 
+					compile2(opAssign, varsid[--varlevel]); 
+				}
+			|	VARIABLE PLUSEQ expr 
+				{
+					compile2(opPushVar, varsid[--varlevel]);
+					compile2(opAdd, -1);
+					compile2(opAssign, varsid[varlevel]);
+				}
+			|	VARIABLE MINUSEQ expr 
+				{
+					compile2(opPushVar, varsid[--varlevel]);
+					compile2(opRevSubtract, -1);	/* port: was opSubtract */
+					compile2(opAssign, varsid[varlevel]);
+				}
+			|	VARIABLE MULTEQ expr 
+				{
+					compile2(opPushVar, varsid[--varlevel]);
+					compile2(opMultiply, -1);
+					compile2(opAssign, varsid[varlevel]);
+				}
+			|	VARIABLE DIVEQ expr 
+				{
+					compile2(opPushVar, varsid[--varlevel]);
+					compile2(opRevDivide, -1);	/* port: was opDivide */
+					compile2(opAssign, varsid[varlevel]);
+				}
+			|	VARIABLE EXPONEQ expr 
+				{
+					compile2(opPushVar, varsid[--varlevel]);
+					compile2(opRevExpon, -1);	/* port: was opExpon */
+					compile2(opAssign, varsid[varlevel]);
+				}
+			;
+
+/* assignments to table array variables */
+
+assignvec	:	VARIABLE '[' expr ']' '=' expr 
+				{ 
+					compile2(opAssignVec, varsid[--varlevel]); 
+				}
+			|	VARIABLE '[' expr ']' PLUSEQ expr 
+				{
+					compile2(opOver, -1);
+					compile2(opPushVec, varsid[--varlevel]);
+					compile2(opAdd, -1);
+					compile2(opAssignVec, varsid[varlevel]);
+				}
+			|	VARIABLE '[' expr ']' MINUSEQ expr 
+				{
+					compile2(opOver, -1);
+					compile2(opPushVec, varsid[--varlevel]);
+					compile2(opRevSubtract, -1);	/* port: was opSubtract */
+					compile2(opAssignVec, varsid[varlevel]);
+				}
+			|	VARIABLE '[' expr ']' MULTEQ expr 
+				{
+					compile2(opOver, -1);
+					compile2(opPushVec, varsid[--varlevel]);
+					compile2(opMultiply, -1);
+					compile2(opAssignVec, varsid[varlevel]);
+				}
+			|	VARIABLE '[' expr ']' DIVEQ expr 
+				{
+					compile2(opOver, -1);
+					compile2(opPushVec, varsid[--varlevel]);
+					compile2(opRevDivide, -1);	/* port: was opDivide */
+					compile2(opAssignVec, varsid[varlevel]);
+				}
+			|	VARIABLE '[' expr ']' EXPONEQ expr 
+				{
+					compile2(opOver, -1);
+					compile2(opPushVec, varsid[--varlevel]);
+					compile2(opRevExpon, -1);	/* port: was opExpon */
+					compile2(opAssignVec, varsid[varlevel]);
+				}
+			;
+
+arglist		:	expr 
+				{ numargs[funclevel-1] = 1; }
+			|	arglist ',' expr
+				{ numargs[funclevel-1] ++; }
+			;
+
+funccall	:	FUNCNAME '(' arglist ')'
+				{ if (!compile2(opFuncCall, funcid[--funclevel])) YYERROR; }
+			|	FUNCNAME '(' ')'
+				{
+					numargs[funclevel-1] = 0; 
+					if (!compile2(opFuncCall, funcid[--funclevel])) YYERROR; 
+				}
+			;
+
+expr	:	CONSTANT			{ compile2(opPushCon, constid[--constlevel]); }
+		|	VARIABLE			{ compile2(opPushVar, varsid[--varlevel]); }
+		|	VARIABLE '[' expr ']'	{ compile2(opPushVec, varsid[--varlevel]); }
+		|	expr '+' expr		{ compile2(opAdd, -1); }
+		|	expr '-' expr		{ compile2(opSubtract, -1); }
+		|	expr '*' expr		{ compile2(opMultiply, -1); }
+		|	expr '/' expr		{ compile2(opDivide, -1); }
+		|	expr '^' expr		{ compile2(opExpon, -1); }
+		|	expr '>' expr		{ compile2(opGreater, -1); }
+		|	expr '<' expr		{ compile2(opLess, -1); }
+		|	expr GREQ expr		{ compile2(opGreaterEq, -1); }
+		|	expr LESSEQ expr	{ compile2(opLessEq, -1); }
+		|	expr CMPEQ expr		{ compile2(opEqual, -1); }
+		|	expr NOTEQ expr		{ compile2(opNotEqual, -1); }
+		|	expr LOGICOR expr		{ compile2(opOr, -1); }
+		|	expr LOGICAND expr		{ compile2(opAnd, -1); }
+		|	expr '?' expr ':' expr	{ compile2(opConditional, -1); }
+		|	'!' expr 				{ compile2(opNot, -1); }
+		|	'-' expr %prec UMINUS	{ compile2(opInvert, -1); }
+		|	'+' expr %prec UPLUS
+		|	'(' expr ')'
+		|	funccall
+		|	assignment
+		|	assignvec
+		;
+	
+uhoh	:	BADTOKEN			{ YYERROR; }

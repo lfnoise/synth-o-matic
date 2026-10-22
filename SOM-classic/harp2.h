@@ -1,0 +1,1 @@
+#define IDENTIFIER 257#define FUNCNAME 258#define DECLARATOR 259#define CONSTANT 260#define VARIABLE 261#define PLUSEQ 262#define MINUSEQ 263#define MULTEQ 264#define DIVEQ 265#define EXPONEQ 266#define UMINUS 267#define UPLUS 268

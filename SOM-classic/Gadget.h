@@ -1,0 +1,1 @@
+typedef struct GadgetRecord	{	int		type;	int		subtype;	int 	id;	byte	vis;	byte	hilite;		Rect	rect;	long	data[2];} GadgetRecord, *GadgetPtr;#define IsVisible  0x80#define IsEnabled  0x40#define IsSelected 0x20#define SelectorGadget	1#define ButtonGadget	2#define DialGadget		3#define LabelGadget		4#define HarmonicGadget	5
