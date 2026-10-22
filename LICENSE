@@ -19,15 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Third-party files in SOM-classic/ keep their own terms:
-
-- bison.simple, and harp2.tab.c, harp3.c and harp9.tab.c, which were
-  generated from it: Copyright (C) 1984 Bob Corbett and Richard Stallman,
-  GNU General Public License version 1 or later.
-- TransSkel.c/.h, TransEdit.c/.h and TransDisplay.c/.h: public domain,
-  written by Paul DuBois.
-
-The macOS port in SynthOMatic/ uses none of these files.
